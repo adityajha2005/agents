@@ -157,13 +157,11 @@ async def test_stt_error_respects_max_unrecoverable_errors():
     closed = asyncio.Event()
     session.on("close", lambda _: closed.set())
 
-    # Errors within the tolerance window must not close the session.
     for _ in range(max_errors):
         session._on_error(make_stt_error())
         await asyncio.sleep(0)
-    assert not closed.is_set(), "session should remain open within tolerance"
+    assert not closed.is_set()
 
-    # One more error crosses the threshold — session must close.
     session._on_error(make_stt_error())
     await asyncio.wait_for(closed.wait(), timeout=5.0)
 

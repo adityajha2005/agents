@@ -4,11 +4,13 @@ including the full e2e path through SessionHost → RemoteSession."""
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 
 import pytest
 
 from livekit.agents import APIStatusError
+from livekit.agents.stt import STTError
 from livekit.agents.types import APIConnectOptions
 from livekit.agents.voice import Agent, AgentSession
 from livekit.agents.voice.agent_session import SessionConnectOptions
@@ -132,4 +134,40 @@ async def test_run_input_error_e2e_through_remote_session():
 
     await client.aclose()
     await host.aclose()
+    await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stt_error_respects_max_unrecoverable_errors():
+    """STT unrecoverable errors must honour max_unrecoverable_errors,
+    matching the tolerance already applied to LLM and TTS errors."""
+    max_errors = 2
+    session = AgentSession(conn_options=SessionConnectOptions(max_unrecoverable_errors=max_errors))
+    agent = Agent(instructions="test", llm=FailingLLM())
+    await session.start(agent=agent)
+
+    def make_stt_error() -> STTError:
+        return STTError(
+            timestamp=time.time(),
+            label="test-stt",
+            error=RuntimeError("stt failed"),
+            recoverable=False,
+        )
+
+    close_events: list[object] = []
+    session.on("close", close_events.append)
+
+    # Errors within the tolerance window must not close the session.
+    for _ in range(max_errors):
+        session._on_error(make_stt_error())
+        await asyncio.sleep(0)
+    assert not close_events, "session should remain open within tolerance"
+
+    # One more error crosses the threshold — session must close.
+    session._on_error(make_stt_error())
+    # Give the closing task a few event-loop ticks to emit the close event.
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert close_events, "session should have closed after exceeding tolerance"
+
     await session.aclose()

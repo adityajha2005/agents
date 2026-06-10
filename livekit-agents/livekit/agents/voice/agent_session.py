@@ -426,6 +426,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         # unrecoverable error counts, reset after agent speaking
         self._llm_error_counts = 0
         self._tts_error_counts = 0
+        self._stt_error_counts = 0
 
         # aec warmup: disable interruptions while AEC warms up
         self._aec_warmup_remaining = aec_warmup_duration or 0.0
@@ -1043,6 +1044,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             self._agent_state = "initializing"
             self._llm_error_counts = 0
             self._tts_error_counts = 0
+            self._stt_error_counts = 0
             self._root_span_context = None
 
             if self._global_run_state and not self._global_run_state.done():
@@ -1513,6 +1515,10 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             self._tts_error_counts += 1
             if self._tts_error_counts <= self.conn_options.max_unrecoverable_errors:
                 return
+        elif error.type == "stt_error":
+            self._stt_error_counts += 1
+            if self._stt_error_counts <= self.conn_options.max_unrecoverable_errors:
+                return
 
         if isinstance(error.error, APIError):
             logger.error(f"AgentSession is closing due to unrecoverable error: {error.error}")
@@ -1599,6 +1605,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         if state == "speaking":
             self._llm_error_counts = 0
             self._tts_error_counts = 0
+            self._stt_error_counts = 0
 
             if self._agent_speaking_span is None:
                 self._agent_speaking_span = tracer.start_span(

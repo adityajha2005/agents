@@ -143,7 +143,7 @@ async def test_stt_error_respects_max_unrecoverable_errors():
     matching the tolerance already applied to LLM and TTS errors."""
     max_errors = 2
     session = AgentSession(conn_options=SessionConnectOptions(max_unrecoverable_errors=max_errors))
-    agent = Agent(instructions="test", llm=FailingLLM())
+    agent = Agent(instructions="test agent", llm=FakeLLM())
     await session.start(agent=agent)
 
     def make_stt_error() -> STTError:
@@ -154,20 +154,17 @@ async def test_stt_error_respects_max_unrecoverable_errors():
             recoverable=False,
         )
 
-    close_events: list[object] = []
-    session.on("close", close_events.append)
+    closed = asyncio.Event()
+    session.on("close", lambda _: closed.set())
 
     # Errors within the tolerance window must not close the session.
     for _ in range(max_errors):
         session._on_error(make_stt_error())
         await asyncio.sleep(0)
-    assert not close_events, "session should remain open within tolerance"
+    assert not closed.is_set(), "session should remain open within tolerance"
 
     # One more error crosses the threshold — session must close.
     session._on_error(make_stt_error())
-    # Give the closing task a few event-loop ticks to emit the close event.
-    for _ in range(10):
-        await asyncio.sleep(0)
-    assert close_events, "session should have closed after exceeding tolerance"
+    await asyncio.wait_for(closed.wait(), timeout=5.0)
 
     await session.aclose()
